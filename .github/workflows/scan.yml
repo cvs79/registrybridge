@@ -1,0 +1,136 @@
+name: Scan
+
+on:
+  workflow_run:
+    workflows: ["Sync"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      fail_on_critical:
+        description: "Fail the workflow if CRITICAL CVEs are found"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    # Run even on manual dispatch; for workflow_run only proceed on success
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.3
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Log in to ACR
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_CLIENT_ID: ${{ secrets.ACR_CLIENT_ID }}
+          ACR_CLIENT_SECRET: ${{ secrets.ACR_CLIENT_SECRET }}
+        run: |
+          echo "${ACR_CLIENT_SECRET}" | docker login "${ACR_LOGIN_SERVER}" \
+            --username "${ACR_CLIENT_ID}" \
+            --password-stdin
+
+      - name: Scan images and update report
+        id: scan
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          FAIL_ON_CRITICAL: ${{ github.event.inputs.fail_on_critical || 'true' }}
+        run: |
+          set -euo pipefail
+
+          REPORT="docs/sync-report.json"
+          FOUND_CRITICAL=false
+          COUNT=$(yq '.images | length' catalog.yaml)
+
+          for i in $(seq 0 $((COUNT - 1))); do
+            TARGET=$(yq ".images[$i].target" catalog.yaml)
+            TAG=$(yq ".images[$i].tag" catalog.yaml)
+            IMAGE="${TARGET}:${TAG}"
+
+            echo "::group::Scanning ${IMAGE}"
+
+            # Run Trivy, emit JSON to a temp file
+            TRIVY_OUTPUT=$(mktemp --suffix=.json)
+            docker run --rm \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.57.1 \
+              image \
+              --format json \
+              --output /dev/stdout \
+              --exit-code 0 \
+              "${IMAGE}" > "${TRIVY_OUTPUT}" 2>/dev/null || true
+
+            # Summarise counts by severity
+            CRITICAL_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "${TRIVY_OUTPUT}")
+            HIGH_COUNT=$(jq     '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' "${TRIVY_OUTPUT}")
+            MEDIUM_COUNT=$(jq   '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")]   | length' "${TRIVY_OUTPUT}")
+            LOW_COUNT=$(jq      '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")]      | length' "${TRIVY_OUTPUT}")
+
+            echo "  CRITICAL=${CRITICAL_COUNT} HIGH=${HIGH_COUNT} MEDIUM=${MEDIUM_COUNT} LOW=${LOW_COUNT}"
+
+            if [[ "${CRITICAL_COUNT}" -gt 0 ]]; then
+              FOUND_CRITICAL=true
+            fi
+
+            SCANNED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+            # Upsert scan result into docs/sync-report.json
+            CURRENT=$(cat "${REPORT}")
+            ENTRY=$(jq -n \
+              --arg target "${TARGET}" \
+              --arg tag    "${TAG}" \
+              --argjson critical "${CRITICAL_COUNT}" \
+              --argjson high     "${HIGH_COUNT}" \
+              --argjson medium   "${MEDIUM_COUNT}" \
+              --argjson low      "${LOW_COUNT}" \
+              --arg scanned_at   "${SCANNED_AT}" \
+              '{target: $target, tag: $tag, critical: $critical, high: $high, medium: $medium, low: $low, scanned_at: $scanned_at}')
+
+            # Merge into .scans[] array keyed on target+tag
+            echo "${CURRENT}" | jq \
+              --argjson entry "${ENTRY}" \
+              '(.scans //= []) |
+               .scans = ([.scans[] | select(.target != $entry.target or .tag != $entry.tag)] + [$entry])' \
+              > "${REPORT}.tmp" && mv "${REPORT}.tmp" "${REPORT}"
+
+            rm -f "${TRIVY_OUTPUT}"
+            echo "::endgroup::"
+          done
+
+          echo "found_critical=${FOUND_CRITICAL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Commit updated report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/sync-report.json
+          if git diff --cached --quiet; then
+            echo "No changes — skipping commit."
+          else
+            git commit -m "chore: update scan results in sync-report.json [skip ci]"
+            git push
+          fi
+
+      - name: Fail on CRITICAL CVEs
+        if: >
+          steps.scan.outputs.found_critical == 'true' &&
+          (github.event.inputs.fail_on_critical == 'true' || github.event_name == 'workflow_run')
+        run: |
+          echo "::error::One or more images contain CRITICAL CVEs. See docs/sync-report.json for details."
+          exit 1

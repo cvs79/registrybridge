@@ -1,0 +1,78 @@
+name: Sync
+
+on:
+  schedule:
+    - cron: "0 2 * * *"   # nightly at 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.16.2"
+
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.3
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Log in to ACR
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_CLIENT_ID: ${{ secrets.ACR_CLIENT_ID }}
+          ACR_CLIENT_SECRET: ${{ secrets.ACR_CLIENT_SECRET }}
+        run: |
+          echo "${ACR_CLIENT_SECRET}" | docker login "${ACR_LOGIN_SERVER}" \
+            --username "${ACR_CLIENT_ID}" \
+            --password-stdin
+
+      - name: Log in to ACR (Helm / OCI)
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          ACR_CLIENT_ID: ${{ secrets.ACR_CLIENT_ID }}
+          ACR_CLIENT_SECRET: ${{ secrets.ACR_CLIENT_SECRET }}
+        run: |
+          echo "${ACR_CLIENT_SECRET}" | helm registry login "${ACR_LOGIN_SERVER}" \
+            --username "${ACR_CLIENT_ID}" \
+            --password-stdin
+
+      - name: Sync images
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+        run: bash scripts/sync-images.sh catalog.yaml
+
+      - name: Sync charts
+        env:
+          ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+        run: bash scripts/sync-charts.sh catalog.yaml
+
+      - name: Generate sync report
+        run: bash scripts/generate-report.sh
+
+      - name: Commit sync report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/sync-report.json
+          if git diff --cached --quiet; then
+            echo "No changes to sync-report.json — skipping commit."
+          else
+            git commit -m "chore: update sync-report.json [skip ci]"
+            git push
+          fi
