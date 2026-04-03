@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RegistryBridge</title>
+  <style>
+    :root {
+      --bg:        #ffffff;
+      --bg-subtle: #f5f5f5;
+      --border:    #e0e0e0;
+      --text:      #1a1a1a;
+      --text-muted:#666666;
+      --accent:    #0066cc;
+      --success:   #2e7d32;
+      --failure:   #c62828;
+      --badge-bg:  #e8f0fe;
+      --badge-text:#1a56db;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg:        #121212;
+        --bg-subtle: #1e1e1e;
+        --border:    #333333;
+        --text:      #e8e8e8;
+        --text-muted:#9e9e9e;
+        --accent:    #4d9fff;
+        --success:   #81c784;
+        --failure:   #ef9a9a;
+        --badge-bg:  #1a2a4a;
+        --badge-text:#90caf9;
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.6;
+      padding: 0 0 4rem;
+    }
+
+    header {
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border);
+      padding: 2rem 1.5rem 1.5rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    header p.tagline {
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+      font-size: 1rem;
+    }
+    header .meta {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    header .meta a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    header .meta a:hover { text-decoration: underline; }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    section { margin-bottom: 3rem; }
+    section h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .filter-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .filter-bar input {
+      flex: 1;
+      min-width: 180px;
+      padding: 0.4rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.875rem;
+    }
+    .filter-bar input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th {
+      text-align: left;
+      font-weight: 600;
+      padding: 0.55rem 0.75rem;
+      background: var(--bg-subtle);
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      word-break: break-all;
+    }
+    tr:hover td { background: var(--bg-subtle); }
+
+    .status-ok   { color: var(--success); font-weight: 600; }
+    .status-fail { color: var(--failure); font-weight: 600; }
+
+    .badge {
+      display: inline-block;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      border-radius: 3px;
+      padding: 0.1rem 0.4rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .cve-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+    .cve-card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.9rem 1rem;
+      background: var(--bg-subtle);
+    }
+    .cve-card h3 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      word-break: break-all;
+    }
+    .cve-bars { display: flex; flex-direction: column; gap: 0.25rem; }
+    .cve-row  { display: flex; justify-content: space-between; font-size: 0.82rem; }
+    .sev-critical { color: var(--failure); font-weight: 700; }
+    .sev-high     { color: #e65100; }
+    .sev-medium   { color: #f57f17; }
+    .sev-low      { color: var(--text-muted); }
+
+    .empty-state {
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--text-muted);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+
+    #loading { text-align: center; padding: 3rem; color: var(--text-muted); }
+    #error   { color: var(--failure); padding: 1rem; background: var(--bg-subtle);
+               border: 1px solid var(--failure); border-radius: 6px; margin-top: 1rem; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RegistryBridge</h1>
+  <p class="tagline">Vetted images. Your registry. Zero drift.</p>
+  <div class="meta">
+    Last synced: <strong id="last-sync">—</strong>
+    &nbsp;|&nbsp;
+    <a href="setup.md">Setup &amp; documentation</a>
+  </div>
+</header>
+
+<main>
+  <div id="loading">Loading sync report…</div>
+  <div id="error" class="hidden"></div>
+
+  <section id="section-images" class="hidden">
+    <h2>Mirrored Images</h2>
+    <div class="filter-bar">
+      <input id="img-filter" type="search" placeholder="Filter by source, target, tag, or mode…" aria-label="Filter images" />
+    </div>
+    <div class="table-wrap">
+      <table id="img-table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Target</th>
+            <th>Tag</th>
+            <th>Mode</th>
+            <th>Status</th>
+            <th>Synced at</th>
+          </tr>
+        </thead>
+        <tbody id="img-body"></tbody>
+      </table>
+    </div>
+    <p id="img-empty" class="empty-state hidden">No images match your filter.</p>
+  </section>
+
+  <section id="section-charts" class="hidden">
+    <h2>Helm Charts</h2>
+    <div class="filter-bar">
+      <input id="chart-filter" type="search" placeholder="Filter by chart, version, or target…" aria-label="Filter charts" />
+    </div>
+    <div class="table-wrap">
+      <table id="chart-table">
+        <thead>
+          <tr>
+            <th>Chart</th>
+            <th>Version</th>
+            <th>Target</th>
+            <th>Status</th>
+            <th>Synced at</th>
+          </tr>
+        </thead>
+        <tbody id="chart-body"></tbody>
+      </table>
+    </div>
+    <p id="chart-empty" class="empty-state hidden">No charts match your filter.</p>
+  </section>
+
+  <section id="section-cve" class="hidden">
+    <h2>CVE Summary</h2>
+    <div class="cve-grid" id="cve-grid"></div>
+  </section>
+</main>
+
+<script>
+  const fmt = (iso) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
+    catch { return iso; }
+  };
+
+  const statusCell = (s) => s === 'success'
+    ? '<span class="status-ok">&#10003; success</span>'
+    : '<span class="status-fail">&#10007; failure</span>';
+
+  const badge = (text) => `<span class="badge">${text}</span>`;
+
+  function filterRows(tbodyId, inputId, emptyId) {
+    const input = document.getElementById(inputId);
+    const tbody = document.getElementById(tbodyId);
+    const empty = document.getElementById(emptyId);
+    input.addEventListener('input', () => {
+      const q = input.value.toLowerCase();
+      let visible = 0;
+      for (const row of tbody.rows) {
+        const match = row.textContent.toLowerCase().includes(q);
+        row.classList.toggle('hidden', !match);
+        if (match) visible++;
+      }
+      empty.classList.toggle('hidden', visible > 0);
+    });
+  }
+
+  async function loadReport() {
+    const loading = document.getElementById('loading');
+    const errEl   = document.getElementById('error');
+
+    try {
+      const res = await fetch('./sync-report.json');
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const data = await res.json();
+
+      loading.classList.add('hidden');
+
+      // Last sync
+      document.getElementById('last-sync').textContent = fmt(data.last_sync);
+
+      // Images
+      const images = data.images || [];
+      if (images.length > 0) {
+        const tbody = document.getElementById('img-body');
+        tbody.innerHTML = images.map(img => `
+          <tr>
+            <td>${img.source || '—'}</td>
+            <td>${img.target || '—'}</td>
+            <td><code>${img.tag || '—'}</code></td>
+            <td>${badge(img.mode || '—')}</td>
+            <td>${statusCell(img.status)}</td>
+            <td>${fmt(img.synced_at)}</td>
+          </tr>`).join('');
+        document.getElementById('section-images').classList.remove('hidden');
+        filterRows('img-body', 'img-filter', 'img-empty');
+      }
+
+      // Charts
+      const charts = data.charts || [];
+      if (charts.length > 0) {
+        const tbody = document.getElementById('chart-body');
+        tbody.innerHTML = charts.map(c => `
+          <tr>
+            <td>${c.chart || '—'}</td>
+            <td><code>${c.version || '—'}</code></td>
+            <td>${c.target || '—'}</td>
+            <td>${statusCell(c.status)}</td>
+            <td>${fmt(c.synced_at)}</td>
+          </tr>`).join('');
+        document.getElementById('section-charts').classList.remove('hidden');
+        filterRows('chart-body', 'chart-filter', 'chart-empty');
+      }
+
+      // CVE scans
+      const scans = data.scans || [];
+      if (scans.length > 0) {
+        const grid = document.getElementById('cve-grid');
+        grid.innerHTML = scans.map(s => `
+          <div class="cve-card">
+            <h3>${s.target}:${s.tag}</h3>
+            <div class="cve-bars">
+              <div class="cve-row"><span class="sev-critical">CRITICAL</span><span>${s.critical ?? '—'}</span></div>
+              <div class="cve-row"><span class="sev-high">HIGH</span><span>${s.high ?? '—'}</span></div>
+              <div class="cve-row"><span class="sev-medium">MEDIUM</span><span>${s.medium ?? '—'}</span></div>
+              <div class="cve-row"><span class="sev-low">LOW</span><span>${s.low ?? '—'}</span></div>
+            </div>
+            <div style="margin-top:0.5rem;font-size:0.78rem;color:var(--text-muted)">Scanned ${fmt(s.scanned_at)}</div>
+          </div>`).join('');
+        document.getElementById('section-cve').classList.remove('hidden');
+      }
+
+      // Show empty state if everything is empty
+      if (images.length === 0 && charts.length === 0 && scans.length === 0) {
+        loading.textContent = 'No sync data yet. Trigger a sync via GitHub Actions to populate this dashboard.';
+        loading.classList.remove('hidden');
+      }
+
+    } catch (err) {
+      loading.classList.add('hidden');
+      errEl.textContent = `Failed to load sync-report.json: ${err.message}`;
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  loadReport();
+</script>
+</body>
+</html>
