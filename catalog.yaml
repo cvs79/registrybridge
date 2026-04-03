@@ -1,21 +1,21 @@
 # catalog.yaml — RegistryBridge source of truth
-# Replace myacr.azurecr.io with your ACR login server.
+# Replace registrybridge.azurecr.io with your ACR login server.
 
 images:
   - source: index.docker.io/grafana/grafana-oss
     tag: "11.2.0"
-    target: myacr.azurecr.io/grafana/grafana-oss
-    mode: mirror                        # plain copy via crane, no build
+    target: registrybridge.azurecr.io/grafana/grafana-oss
+    mode: mirror # plain copy via crane, no build
 
   - source: index.docker.io/grafana/grafana-oss
     tag: "11.2.0"
-    target: myacr.azurecr.io/grafana/grafana-custom
-    mode: build                         # wrapper Dockerfile build
-    context: ./builds/grafana           # path to build context in repo
-    dockerfile: Dockerfile              # relative to context
+    target: registrybridge.azurecr.io/grafana/grafana-custom
+    mode: build # wrapper Dockerfile build
+    context: ./builds/grafana # path to build context in repo
+    dockerfile: Dockerfile # relative to context
 
 charts:
   - repo: https://grafana.github.io/helm-charts
     chart: grafana
     version: "7.3.9"
-    target: myacr.azurecr.io/helm/grafana   # OCI push target (strip chart name for registry arg)
+    target: registrybridge.azurecr.io/helm/grafana # OCI push target (strip chart name for registry arg)
