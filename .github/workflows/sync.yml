@@ -1,8 +1,8 @@
 name: Sync
 
 on:
-  schedule:
-    - cron: "0 2 * * *"   # nightly at 02:00 UTC
+  # schedule:
+  #   - cron: "0 2 * * *"   # nightly at 02:00 UTC
   workflow_dispatch:
 
 permissions:
