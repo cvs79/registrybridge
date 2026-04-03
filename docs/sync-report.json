@@ -2,5 +2,24 @@
   "last_sync": "2026-04-03T12:46:56Z",
   "images": [],
   "charts": [],
-  "scans": []
+  "scans": [
+    {
+      "target": "registrybridge.azurecr.io/grafana/grafana-oss",
+      "tag": "11.2.0",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0,
+      "scanned_at": "2026-04-03T12:53:50Z"
+    },
+    {
+      "target": "registrybridge.azurecr.io/grafana/grafana-custom",
+      "tag": "11.2.0",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0,
+      "scanned_at": "2026-04-03T12:54:00Z"
+    }
+  ]
 }
