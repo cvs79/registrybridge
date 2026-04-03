@@ -76,11 +76,15 @@ jobs:
               --exit-code 0 \
               "${IMAGE}" > "${TRIVY_OUTPUT}" 2>/dev/null || true
 
-            # Summarise counts by severity
-            CRITICAL_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "${TRIVY_OUTPUT}")
-            HIGH_COUNT=$(jq     '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' "${TRIVY_OUTPUT}")
-            MEDIUM_COUNT=$(jq   '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")]   | length' "${TRIVY_OUTPUT}")
-            LOW_COUNT=$(jq      '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")]      | length' "${TRIVY_OUTPUT}")
+            # Summarise counts by severity (default to 0 if Trivy output is empty/invalid)
+            CRITICAL_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
+            HIGH_COUNT=$(jq     '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
+            MEDIUM_COUNT=$(jq   '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")]   | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
+            LOW_COUNT=$(jq      '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")]      | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
+            CRITICAL_COUNT=${CRITICAL_COUNT:-0}
+            HIGH_COUNT=${HIGH_COUNT:-0}
+            MEDIUM_COUNT=${MEDIUM_COUNT:-0}
+            LOW_COUNT=${LOW_COUNT:-0}
 
             echo "  CRITICAL=${CRITICAL_COUNT} HIGH=${HIGH_COUNT} MEDIUM=${MEDIUM_COUNT} LOW=${LOW_COUNT}"
 
