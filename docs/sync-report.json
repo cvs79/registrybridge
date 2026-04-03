@@ -10,7 +10,7 @@
       "high": 0,
       "medium": 0,
       "low": 0,
-      "scanned_at": "2026-04-03T12:53:50Z"
+      "scanned_at": "2026-04-03T13:19:20Z"
     },
     {
       "target": "registrybridge.azurecr.io/grafana/grafana-custom",
@@ -19,7 +19,7 @@
       "high": 0,
       "medium": 0,
       "low": 0,
-      "scanned_at": "2026-04-03T12:54:00Z"
+      "scanned_at": "2026-04-03T13:19:29Z"
     }
   ]
 }
