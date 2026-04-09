@@ -4,6 +4,11 @@ on:
   # schedule:
   #   - cron: "0 2 * * *"   # nightly at 02:00 UTC
   workflow_dispatch:
+    inputs:
+      fail_on_critical:
+        description: "Block image copy if CRITICAL CVEs are found"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -32,6 +37,11 @@ jobs:
       - name: Install jq
         run: sudo apt-get install -y jq
 
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.57.1
+
       - name: Log in to ACR
         env:
           ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
@@ -55,6 +65,7 @@ jobs:
       - name: Sync images
         env:
           ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+          SCAN_FAIL_ON_CRITICAL: ${{ inputs.fail_on_critical }}
         run: bash scripts/sync-images.sh catalog.yaml
 
       - name: Sync charts

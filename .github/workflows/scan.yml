@@ -1,10 +1,6 @@
 name: Scan
 
 on:
-  workflow_run:
-    workflows: ["Sync"]
-    types:
-      - completed
   workflow_dispatch:
     inputs:
       fail_on_critical:
@@ -19,11 +15,6 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    # Run even on manual dispatch; for workflow_run only proceed on success
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
-
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -50,7 +41,7 @@ jobs:
         id: scan
         env:
           ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-          FAIL_ON_CRITICAL: ${{ github.event.inputs.fail_on_critical || 'true' }}
+          FAIL_ON_CRITICAL: ${{ inputs.fail_on_critical }}
         run: |
           set -euo pipefail
 
@@ -132,9 +123,7 @@ jobs:
           fi
 
       - name: Fail on CRITICAL CVEs
-        if: >
-          steps.scan.outputs.found_critical == 'true' &&
-          (github.event.inputs.fail_on_critical == 'true' || github.event_name == 'workflow_run')
+        if: steps.scan.outputs.found_critical == 'true' && inputs.fail_on_critical == true
         run: |
           echo "::error::One or more images contain CRITICAL CVEs. See docs/sync-report.json for details."
           exit 1
