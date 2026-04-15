@@ -319,11 +319,34 @@
         filterRows('chart-body', 'chart-filter', 'chart-empty');
       }
 
-      // CVE scans
+      // CVE scans — prefer standalone scans[] if present, otherwise use inline
+      // scan data from images[] (populated by the sync workflow).
       const scans = data.scans || [];
-      if (scans.length > 0) {
+      const cveSource = scans.length > 0
+        ? scans.map(s => ({
+            target:     s.target,
+            tag:        s.tag,
+            critical:   s.critical,
+            high:       s.high,
+            medium:     s.medium,
+            low:        s.low,
+            scanned_at: s.scanned_at,
+          }))
+        : images
+            .filter(img => img.scan_time)
+            .map(img => ({
+              target:     img.target,
+              tag:        img.tag,
+              critical:   img.scan_critical,
+              high:       img.scan_high,
+              medium:     img.scan_medium,
+              low:        img.scan_low,
+              scanned_at: img.scan_time,
+            }));
+
+      if (cveSource.length > 0) {
         const grid = document.getElementById('cve-grid');
-        grid.innerHTML = scans.map(s => `
+        grid.innerHTML = cveSource.map(s => `
           <div class="cve-card">
             <h3>${s.target}:${s.tag}</h3>
             <div class="cve-bars">
@@ -337,8 +360,8 @@
         document.getElementById('section-cve').classList.remove('hidden');
       }
 
-      // Show empty state if everything is empty
-      if (images.length === 0 && charts.length === 0 && scans.length === 0) {
+      // Show empty state only when there is genuinely no data at all
+      if (images.length === 0 && charts.length === 0 && cveSource.length === 0) {
         loading.textContent = 'No sync data yet. Trigger a sync via GitHub Actions to populate this dashboard.';
         loading.classList.remove('hidden');
       }

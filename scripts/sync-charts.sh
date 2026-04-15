@@ -68,3 +68,8 @@ for i in $(seq 0 $((COUNT - 1))); do
 done
 
 echo "Chart sync complete. Results written to ${RESULTS_FILE}"
+
+# Propagate the results file path to subsequent GitHub Actions steps
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "SYNC_CHART_RESULTS_FILE=${RESULTS_FILE}" >> "${GITHUB_ENV}"
+fi

@@ -49,6 +49,10 @@ jobs:
           FOUND_CRITICAL=false
           COUNT=$(yq '.images | length' catalog.yaml)
 
+          # Build a fresh scans array — only entries for images currently in catalog.yaml.
+          # This automatically removes stale entries from previous registry names or removed images.
+          NEW_SCANS="[]"
+
           for i in $(seq 0 $((COUNT - 1))); do
             TARGET=$(yq ".images[$i].target" catalog.yaml)
             TAG=$(yq ".images[$i].tag" catalog.yaml)
@@ -56,26 +60,30 @@ jobs:
 
             echo "::group::Scanning ${IMAGE}"
 
-            # Run Trivy, emit JSON to a temp file
+            # Run Trivy; keep stderr visible in the workflow log for diagnostics
             TRIVY_OUTPUT=$(mktemp --suffix=.json)
             docker run --rm \
               -v /var/run/docker.sock:/var/run/docker.sock \
-              aquasec/trivy:0.57.1 \
+              aquasec/trivy:0.69.3 \
               image \
               --format json \
               --output /dev/stdout \
               --exit-code 0 \
-              "${IMAGE}" > "${TRIVY_OUTPUT}" 2>/dev/null || true
+              "${IMAGE}" > "${TRIVY_OUTPUT}" || true
 
-            # Summarise counts by severity (default to 0 if Trivy output is empty/invalid)
-            CRITICAL_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
-            HIGH_COUNT=$(jq     '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
-            MEDIUM_COUNT=$(jq   '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")]   | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
-            LOW_COUNT=$(jq      '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")]      | length' "${TRIVY_OUTPUT}" 2>/dev/null || echo 0)
-            CRITICAL_COUNT=${CRITICAL_COUNT:-0}
-            HIGH_COUNT=${HIGH_COUNT:-0}
-            MEDIUM_COUNT=${MEDIUM_COUNT:-0}
-            LOW_COUNT=${LOW_COUNT:-0}
+            # Validate Trivy produced usable JSON before parsing counts
+            if ! jq -e '.Results' "${TRIVY_OUTPUT}" > /dev/null 2>&1; then
+              echo "::warning::Trivy output for ${IMAGE} is missing or invalid — skipping scan entry for this image"
+              rm -f "${TRIVY_OUTPUT}"
+              echo "::endgroup::"
+              continue
+            fi
+
+            # Summarise counts by severity
+            CRITICAL_COUNT=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' "${TRIVY_OUTPUT}")
+            HIGH_COUNT=$(jq     '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' "${TRIVY_OUTPUT}")
+            MEDIUM_COUNT=$(jq   '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")]   | length' "${TRIVY_OUTPUT}")
+            LOW_COUNT=$(jq      '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")]      | length' "${TRIVY_OUTPUT}")
 
             echo "  CRITICAL=${CRITICAL_COUNT} HIGH=${HIGH_COUNT} MEDIUM=${MEDIUM_COUNT} LOW=${LOW_COUNT}"
 
@@ -85,11 +93,9 @@ jobs:
 
             SCANNED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-            # Upsert scan result into docs/sync-report.json
-            CURRENT=$(cat "${REPORT}")
             ENTRY=$(jq -n \
-              --arg target "${TARGET}" \
-              --arg tag    "${TAG}" \
+              --arg target       "${TARGET}" \
+              --arg tag          "${TAG}" \
               --argjson critical "${CRITICAL_COUNT}" \
               --argjson high     "${HIGH_COUNT}" \
               --argjson medium   "${MEDIUM_COUNT}" \
@@ -97,16 +103,16 @@ jobs:
               --arg scanned_at   "${SCANNED_AT}" \
               '{target: $target, tag: $tag, critical: $critical, high: $high, medium: $medium, low: $low, scanned_at: $scanned_at}')
 
-            # Merge into .scans[] array keyed on target+tag
-            echo "${CURRENT}" | jq \
-              --argjson entry "${ENTRY}" \
-              '(.scans //= []) |
-               .scans = ([.scans[] | select(.target != $entry.target or .tag != $entry.tag)] + [$entry])' \
-              > "${REPORT}.tmp" && mv "${REPORT}.tmp" "${REPORT}"
+            NEW_SCANS=$(echo "${NEW_SCANS}" | jq ". + [\$entry]" --argjson entry "${ENTRY}")
 
             rm -f "${TRIVY_OUTPUT}"
             echo "::endgroup::"
           done
+
+          # Replace .scans wholesale with only the current catalog's results
+          CURRENT=$(cat "${REPORT}")
+          echo "${CURRENT}" | jq --argjson scans "${NEW_SCANS}" '.scans = $scans' \
+            > "${REPORT}.tmp" && mv "${REPORT}.tmp" "${REPORT}"
 
           echo "found_critical=${FOUND_CRITICAL}" >> "${GITHUB_OUTPUT}"
 

@@ -154,6 +154,11 @@ done
 
 echo "Image sync complete. Results written to ${RESULTS_FILE}"
 
+# Propagate the results file path to subsequent GitHub Actions steps
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "SYNC_IMAGE_RESULTS_FILE=${RESULTS_FILE}" >> "${GITHUB_ENV}"
+fi
+
 # Fail at the end so all images are processed first
 if [[ "${#BLOCKED_IMAGES[@]}" -gt 0 ]]; then
   echo "ERROR: ${#BLOCKED_IMAGES[@]} image(s) blocked due to CRITICAL CVEs:" >&2

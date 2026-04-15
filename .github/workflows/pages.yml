@@ -7,7 +7,7 @@ on:
     paths:
       - "docs/**"
   workflow_run:
-    workflows: ["Scan"]
+    workflows: ["Sync", "Scan"]
     types:
       - completed
 
