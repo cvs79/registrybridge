@@ -1,0 +1,44 @@
+{
+  "last_sync": "2026-04-15T06:22:06Z",
+  "images": [
+    {
+      "source": "index.docker.io/grafana/grafana-oss",
+      "target": "registrybridge.azurecr.io/grafana/grafana-oss",
+      "tag": "11.2.0",
+      "mode": "mirror",
+      "status": "success",
+      "context_hash": "",
+      "synced_at": "2026-04-15T06:21:36Z",
+      "scan_critical": 6,
+      "scan_high": 43,
+      "scan_medium": 142,
+      "scan_low": 17,
+      "scan_blocked": false,
+      "scan_time": "2026-04-15T06:21:43Z"
+    },
+    {
+      "source": "index.docker.io/grafana/grafana-oss",
+      "target": "registrybridge.azurecr.io/grafana/grafana-custom",
+      "tag": "11.2.0",
+      "mode": "build",
+      "status": "success",
+      "context_hash": "b56fac5767cba56af57c7b5fc488419a60ef6e29b8a888aef15ba24cb48220b5",
+      "synced_at": "2026-04-15T06:21:45Z",
+      "scan_critical": 6,
+      "scan_high": 43,
+      "scan_medium": 142,
+      "scan_low": 17,
+      "scan_blocked": false,
+      "scan_time": "2026-04-15T06:21:57Z"
+    }
+  ],
+  "charts": [
+    {
+      "chart": "grafana",
+      "version": "7.3.9",
+      "target": "registrybridge.azurecr.io/helm/grafana",
+      "status": "success",
+      "synced_at": "2026-04-15T06:22:03Z"
+    }
+  ]
+}
