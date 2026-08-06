@@ -418,5 +418,4 @@ FodyWeavers.xsd
 *.msp
 
 .DS_Store
-/control-plane/dist/
-/control-plane/.vite/
+/src/RegistryBridge.ControlPlane/.vite/

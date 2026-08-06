@@ -2,20 +2,25 @@
 
 RegistryBridge is a local Control Plane for operating a deployment-specific Catalog of registry artifacts and synchronizing them to its target registry.
 
+## Repository layout
+
+- `src/RegistryBridge.Api/` is the ASP.NET Core API and application process.
+- `src/RegistryBridge.ControlPlane/` is the Vite/React Control Plane. Its nested `src/` is the conventional Vite source directory.
+- `tests/RegistryBridge.Api.IntegrationTests/` contains the PostgreSQL-backed integration tests.
+- `RegistryBridge.slnx` remains at the repository root, the conventional location for a .NET solution.
+
 ## Local runtime
 
-Start the Control Plane, application, and PostgreSQL:
+Create your local configuration from the committed safe template, then set a non-production database password and the target registry for this deployment:
 
 ```sh
-docker compose up --build
+cp .env.example .env
 ```
 
-The Control Plane is available at [http://localhost:8080](http://localhost:8080), the application health endpoints at [http://localhost:8081/health](http://localhost:8081/health) and [http://localhost:8081/ready](http://localhost:8081/ready), and PostgreSQL at `localhost:5432` for DBeaver.
-
-The `postgres-data` and `trivy-cache` named volumes persist across normal Compose restarts. To reset a local installation, remove those volumes:
+Start the Control Plane, application, and PostgreSQL with the explicitly selected environment file:
 
 ```sh
-docker compose down --volumes
+docker compose --env-file .env up --build
 ```
 
-The application runs `serve`, takes a PostgreSQL advisory lock, and applies migrations before accepting traffic. A new installation has no Catalog Entries.
+The Control Plane is available at [http://localhost:8080](http://localhost:8080), the application health endpoints at [http://localhost:8081/health](http://localhost:8081/health) and [http://localhost:8081/ready](http://localhost:8081/ready), and PostgreSQL at `localhost:5432` for DBeaver. See [the setup guide](docs/setup.md) for the complete variable reference and reset procedure.

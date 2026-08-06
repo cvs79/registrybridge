@@ -2,5 +2,6 @@
 .DS_Store
 **/bin
 **/obj
-control-plane/node_modules
-control-plane/dist
+src/RegistryBridge.ControlPlane/node_modules
+src/RegistryBridge.ControlPlane/dist
+src/RegistryBridge.ControlPlane/.vite
