@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using RegistryBridge.Api.ArtifactExecution;
@@ -75,12 +76,20 @@ public sealed class ControlPlaneIntegrationTests(PostgreSqlFixture postgreSql)
 
 public sealed class RegistryBridgeApplicationFactory(
     string connectionString,
-    IArtifactExecutionGateway? artifactExecutionGateway = null) : WebApplicationFactory<global::Program>
+    IArtifactExecutionGateway? artifactExecutionGateway = null,
+    IReadOnlyDictionary<string, string?>? configuration = null) : WebApplicationFactory<global::Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         builder.UseSetting("ConnectionStrings:RegistryBridge", connectionString);
+        builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+        {
+            if (configuration is not null)
+            {
+                configurationBuilder.AddInMemoryCollection(configuration);
+            }
+        });
 
         if (artifactExecutionGateway is not null)
         {
