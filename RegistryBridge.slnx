@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RegistryBridge.Api/RegistryBridge.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RegistryBridge.Api.IntegrationTests/RegistryBridge.Api.IntegrationTests.csproj" />
+  </Folder>
+</Solution>
