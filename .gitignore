@@ -423,3 +423,4 @@ web/node_modules/
 web/.env.local
 web/.env.development.local
 web/.env.*.local
+web/tsconfig.tsbuildinfo

@@ -56,9 +56,13 @@ public sealed class ControlPlaneIntegrationTests(PostgreSqlFixture postgreSql)
 
         using var health = await client.GetAsync("/health");
         using var aliveness = await client.GetAsync("/alive");
+        using var healthz = await client.GetAsync("/healthz");
+        using var readyz = await client.GetAsync("/readyz");
 
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
         Assert.Equal(HttpStatusCode.OK, aliveness.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, healthz.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, readyz.StatusCode);
     }
 
     [Fact]

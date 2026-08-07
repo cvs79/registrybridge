@@ -37,7 +37,7 @@ The credential handle is an identifier only. Registry credential material is not
 aspire run
 ```
 
-Aspire starts PostgreSQL, the API, and the Next.js Control Plane. Open the Control Plane at `http://localhost:3000`; Aspire displays the service endpoints and logs in its dashboard.
+Aspire starts PostgreSQL, the API, and the Next.js Control Plane. Open the Control Plane at `http://localhost:3000`; Aspire displays the service endpoints and logs in its dashboard. Its project lives at `src/RegistryBridge.AppHost/`.
 
 ## Deployment configuration
 

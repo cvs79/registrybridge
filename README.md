@@ -4,7 +4,7 @@ RegistryBridge is a local Control Plane for operating a deployment-specific Cata
 
 ## Repository layout
 
-- `apphost/` is the .NET Aspire orchestrator, which starts the API, Next.js Control Plane, and PostgreSQL.
+- `src/RegistryBridge.AppHost/` is the .NET Aspire orchestrator, which starts the API, Next.js Control Plane, and PostgreSQL.
 - `servicedefaults/` provides the Aspire OpenTelemetry, service discovery, resilience, and health-check defaults.
 - `src/RegistryBridge.Api/` is the ASP.NET Core API and application process.
 - `web/` is the Next.js App Router Control Plane, built with TypeScript and Tailwind CSS.

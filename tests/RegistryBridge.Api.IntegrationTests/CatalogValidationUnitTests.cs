@@ -62,6 +62,76 @@ public sealed class CatalogValidationUnitTests
         Assert.Contains("entries[0].targetTag", errors.Keys);
     }
 
+    [Fact]
+    public void AcceptsPinnedWrapperBuildAndHelmChartInputsWithCompatibleCredentialHandles()
+    {
+        var request = new CatalogSaveRequest(
+            null,
+            [
+                new CatalogEntryInput(
+                    Guid.NewGuid(),
+                    "https://git.example.test/team/widget.git",
+                    "builds/team/widget",
+                    "release-2026",
+                    "git-source",
+                    true,
+                    CatalogEntryKind.WrapperBuild,
+                    "0123456789abcdef0123456789abcdef01234567"),
+                new CatalogEntryInput(
+                    Guid.NewGuid(),
+                    "oci://charts.example.test/helm/widget",
+                    "charts/widget",
+                    "1.2.3",
+                    "chart-source",
+                    true,
+                    CatalogEntryKind.HelmChart,
+                    "1.2.3",
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            ]);
+
+        var errors = CatalogValidation.Validate(
+            request,
+            [
+                new DeclaredCredentialHandle { Name = "git-source", Type = "HttpsGit" },
+                new DeclaredCredentialHandle { Name = "chart-source", Type = "OciRegistry" }
+            ]);
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void RejectsWrapperBuildsWithoutFullCommitIdsAndHelmChartsWithMismatchedTargetVersions()
+    {
+        var request = new CatalogSaveRequest(
+            null,
+            [
+                new CatalogEntryInput(
+                    Guid.NewGuid(),
+                    "https://git.example.test/team/widget.git",
+                    "builds/team/widget",
+                    "release-2026",
+                    null,
+                    true,
+                    CatalogEntryKind.WrapperBuild,
+                    "deadbeef"),
+                new CatalogEntryInput(
+                    Guid.NewGuid(),
+                    "https://charts.example.test",
+                    "charts/widget",
+                    "1.2.2",
+                    null,
+                    true,
+                    CatalogEntryKind.HelmChart,
+                    "1.2.3",
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            ]);
+
+        var errors = CatalogValidation.Validate(request, []);
+
+        Assert.Contains("entries[0].sourceVersion", errors.Keys);
+        Assert.Contains("entries[1].targetTag", errors.Keys);
+    }
+
     private static CatalogEntryInput ImageMirror(
         string sourceReference,
         string targetRepository,

@@ -1,7 +1,5 @@
 <Solution>
-  <Folder Name="/apphost/">
-    <Project Path="apphost/RegistryBridge.AppHost.csproj" />
-  </Folder>
+  <Folder Name="/apphost/" />
   <Folder Name="/servicedefaults/">
     <Project Path="servicedefaults/RegistryBridge.ServiceDefaults.csproj" />
   </Folder>

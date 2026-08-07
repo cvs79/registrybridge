@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using RegistryBridge.Api.Data;
@@ -11,9 +12,11 @@ using RegistryBridge.Api.Data;
 namespace RegistryBridge.Api.Migrations
 {
     [DbContext(typeof(RegistryBridgeDbContext))]
-    partial class RegistryBridgeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807133458_AddSynchronizationRuns")]
+    partial class AddSynchronizationRuns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
