@@ -55,10 +55,10 @@ public sealed class ControlPlaneIntegrationTests(PostgreSqlFixture postgreSql)
         using var client = application.CreateClient();
 
         using var health = await client.GetAsync("/health");
-        using var readiness = await client.GetAsync("/ready");
+        using var aliveness = await client.GetAsync("/alive");
 
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, readiness.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, aliveness.StatusCode);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class RegistryBridgeApplicationFactory(
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:RegistryBridge", connectionString);
         builder.ConfigureAppConfiguration((_, configurationBuilder) =>
         {

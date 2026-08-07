@@ -1,49 +1,26 @@
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using RegistryBridge.Api;
 using RegistryBridge.Api.ArtifactExecution;
 using RegistryBridge.Api.Catalog;
 using RegistryBridge.Api.Data;
 using RegistryBridge.Api.Deployment;
 
-RegistryBridgeCommand.EnsureServe(args);
-
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("RegistryBridge")
-    ?? throw new InvalidOperationException("The RegistryBridge database connection string is required.");
-
-builder.Services.AddDbContext<RegistryBridgeDbContext>(options => options.UseNpgsql(connectionString));
+builder.AddServiceDefaults();
+builder.AddNpgsqlDbContext<RegistryBridgeDbContext>("registrybridge");
 builder.Services.AddScoped<DatabaseMigrator>();
 builder.Services.AddSingleton<IArtifactExecutionGateway, UnavailableArtifactExecutionGateway>();
 builder.Services.Configure<DeploymentConfiguration>(
     builder.Configuration.GetSection("Deployment"));
 builder.Services
     .AddHealthChecks()
-    .AddCheck(
-        "application",
-        () => HealthCheckResult.Healthy(),
-        tags: ["live", "ready"])
     .AddDbContextCheck<RegistryBridgeDbContext>(
-        "postgresql",
-        failureStatus: HealthStatus.Unhealthy,
-        tags: ["ready"]);
+        "postgresql");
 
 var app = builder.Build();
 
-app.MapHealthChecks(
-    "/health",
-    new HealthCheckOptions
-    {
-        Predicate = registration => registration.Tags.Contains("live")
-    });
-app.MapHealthChecks(
-    "/ready",
-    new HealthCheckOptions
-    {
-        Predicate = registration => registration.Tags.Contains("ready")
-    });
+app.MapDefaultEndpoints();
 
 app.MapGet(
     "/api/catalog",

@@ -418,4 +418,8 @@ FodyWeavers.xsd
 *.msp
 
 .DS_Store
-/src/RegistryBridge.ControlPlane/.vite/
+web/.next/
+web/node_modules/
+web/.env.local
+web/.env.development.local
+web/.env.*.local
