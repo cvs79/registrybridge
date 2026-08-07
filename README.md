@@ -21,6 +21,12 @@ dotnet restore RegistryBridge.slnx
 cd web && npm install && cd ..
 ```
 
+Create your local deployment configuration from the safe template:
+
+```sh
+cp .env.example .env
+```
+
 Start the full local application:
 
 ```sh
@@ -29,4 +35,4 @@ aspire run
 
 Aspire opens its dashboard automatically. The Control Plane is available at [http://localhost:3000](http://localhost:3000); it proxies catalog requests to the API through a server-side Next.js route. The API's development health endpoints are `/health` and `/alive`.
 
-The development deployment configuration defaults to `example.azurecr.io` and the `target-acr` OCI credential handle. Override these non-secret values with `Deployment__TargetRegistry` and `Deployment__CredentialHandles__0__Name` / `Deployment__CredentialHandles__0__Type` when required.
+Aspire loads the non-secret deployment settings in `.env` and passes them to the API. PostgreSQL is still managed by Aspire, so no database credentials belong in `.env`.
