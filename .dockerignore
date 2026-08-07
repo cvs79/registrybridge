@@ -1,0 +1,6 @@
+.git
+.env
+**/bin
+**/obj
+**/node_modules
+src/RegistryBridge.Api/wwwroot
