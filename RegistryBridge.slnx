@@ -1,4 +1,10 @@
 <Solution>
+  <Folder Name="/apphost/">
+    <Project Path="apphost/RegistryBridge.AppHost.csproj" />
+  </Folder>
+  <Folder Name="/servicedefaults/">
+    <Project Path="servicedefaults/RegistryBridge.ServiceDefaults.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/RegistryBridge.Api/RegistryBridge.Api.csproj" />
   </Folder>
