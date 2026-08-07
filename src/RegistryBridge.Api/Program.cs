@@ -51,9 +51,6 @@ if (args.Length == 1 && string.Equals(args[0], "run", StringComparison.OrdinalIg
     return;
 }
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
 app.MapDefaultEndpoints();
 app.MapHealthChecks(
     "/healthz",
@@ -251,8 +248,6 @@ app.MapPut(
             $"/api/catalog/revisions/{revision.Id}",
             CatalogDefinitions.ToResponse(revision));
     });
-
-app.MapFallbackToFile("index.html");
 
 using (var scope = app.Services.CreateScope())
 {

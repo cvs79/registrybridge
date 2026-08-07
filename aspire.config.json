@@ -1,0 +1,5 @@
+{
+  "appHost": {
+    "path": "src/RegistryBridge.AppHost/RegistryBridge.AppHost.csproj"
+  }
+}

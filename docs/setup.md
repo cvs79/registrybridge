@@ -1,18 +1,44 @@
-# Local setup
+# RegistryBridge local setup
 
-RegistryBridge is deployed locally with Docker Compose. Copy the safe template, set a local PostgreSQL password and target registry, then start the stack:
+## Prerequisites
+
+- .NET SDK 10.x
+- Aspire CLI 13.x or later
+- Node.js 20.x or later
+- Docker Desktop, used by Aspire to run PostgreSQL
+
+## Install dependencies
+
+```sh
+dotnet tool install -g aspire.cli
+dotnet restore RegistryBridge.slnx
+cd web && npm install && cd ..
+```
+
+## Configure a local deployment
+
+Create the ignored local settings file:
 
 ```sh
 cp .env.example .env
-docker compose --env-file .env up --build
 ```
 
-The Control Plane is at `http://127.0.0.1:8080`, with `/healthz` and `/readyz` available for local diagnostics. PostgreSQL is available to DBeaver at `127.0.0.1:5432`; use `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` from `.env`.
+| Variable | Purpose |
+|----------|---------|
+| `REGISTRYBRIDGE_TARGET_REGISTRY` | The deployment's fixed target registry host, such as `myregistry.azurecr.io`. |
+| `REGISTRYBRIDGE_CREDENTIAL_HANDLE_NAME` | Non-secret name shown in the Control Plane for the deployment's OCI-registry credential. |
+| `REGISTRYBRIDGE_CREDENTIAL_HANDLE_TYPE` | Credential type; use `OciRegistry` for an OCI registry. |
 
-`registrybridge-postgres` retains Catalog Revisions, Synchronization Runs, Artifact Outcomes, Vulnerability Findings, and Run Logs. `registrybridge-trivy-cache` retains scanner downloads. Reset both with:
+The credential handle is an identifier only. Registry credential material is not stored in PostgreSQL and must not be committed to `.env`.
+
+## Run locally
 
 ```sh
-docker compose --env-file .env down --volumes
+aspire run
 ```
 
-The Control Plane remains unauthenticated for this localhost-only MVP. Never bind it to a LAN interface or commit `.env`.
+Aspire starts PostgreSQL, the API, and the Next.js Control Plane. Open the Control Plane at `http://localhost:3000`; Aspire displays the service endpoints and logs in its dashboard. Its project lives at `src/RegistryBridge.AppHost/`.
+
+## Deployment configuration
+
+Aspire loads `.env` from the repository root and passes those values to the API. PostgreSQL is provisioned and configured by Aspire; do not add a connection string or database credentials to `.env`.

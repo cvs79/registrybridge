@@ -1,7 +1,8 @@
 var environmentFile = new[]
     {
         Path.Combine(Directory.GetCurrentDirectory(), ".env"),
-        Path.Combine(Directory.GetCurrentDirectory(), "..", ".env")
+        Path.Combine(Directory.GetCurrentDirectory(), "..", ".env"),
+        Path.Combine(Directory.GetCurrentDirectory(), "..", "..", ".env")
     }
     .Select(Path.GetFullPath)
     .FirstOrDefault(File.Exists);
@@ -42,7 +43,7 @@ if (!string.IsNullOrWhiteSpace(credentialHandleType))
     api.WithEnvironment("Deployment__CredentialHandles__0__Type", credentialHandleType);
 }
 
-builder.AddNpmApp("web", "../web", "dev")
+builder.AddNpmApp("web", "../../web", "dev")
     .WithReference(api)
     .WaitFor(api)
     .WithEnvironment("API_URL", api.GetEndpoint("http"))

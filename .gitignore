@@ -423,5 +423,4 @@ web/node_modules/
 web/.env.local
 web/.env.development.local
 web/.env.*.local
-src/RegistryBridge.ControlPlane/node_modules/
-src/RegistryBridge.Api/wwwroot/
+web/tsconfig.tsbuildinfo
