@@ -103,6 +103,7 @@ app.MapGet(
         TypedResults.Ok(
             new DeploymentConfigurationResponse(
                 deployment.Value.TargetRegistry,
+                deployment.Value.RunLogLimitBytes,
                 deployment.Value.CredentialHandles
                     .Select(handle => new CredentialHandleResponse(handle.Name, handle.Type))
                     .ToArray())));

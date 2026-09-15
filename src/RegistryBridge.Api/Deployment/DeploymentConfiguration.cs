@@ -22,6 +22,7 @@ public sealed class DeclaredCredentialHandle
 
 public sealed record DeploymentConfigurationResponse(
     string TargetRegistry,
+    int RunLogLimitBytes,
     IReadOnlyList<CredentialHandleResponse> CredentialHandles);
 
 public sealed record CredentialHandleResponse(string Name, string Type);

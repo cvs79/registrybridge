@@ -48,6 +48,7 @@ type CredentialHandle = {
 
 type DeploymentConfiguration = {
   targetRegistry: string;
+  runLogLimitBytes: number;
   credentialHandles: CredentialHandle[];
 };
 
@@ -140,6 +141,15 @@ function formatRevisionDate(value: string): string {
   }).format(new Date(value));
 }
 
+function formatMegabytes(bytes: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    style: "unit",
+    unit: "megabyte",
+    unitDisplay: "short",
+  }).format(bytes / (1024 * 1024));
+}
+
 function StatusPill({
   children,
   muted = false,
@@ -201,9 +211,25 @@ export default function ControlPlanePage() {
   const [runs, setRuns] = useState<SynchronizationRun[]>([]);
   const [selectedRun, setSelectedRun] =
     useState<SynchronizationRunDetail | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isStartingRun, setIsStartingRun] = useState(false);
+
+  const loadRunDetail = useCallback(async (runId: string) => {
+    try {
+      setSelectedRun(
+        await request<SynchronizationRunDetail>(`/api/runs/${runId}`),
+      );
+      setRunError(null);
+    } catch (error) {
+      setRunError(
+        error instanceof Error
+          ? error.message
+          : "The Synchronization Run could not be loaded.",
+      );
+    }
+  }, []);
 
   const loadControlPlane = useCallback(async () => {
     try {
@@ -219,6 +245,14 @@ export default function ControlPlanePage() {
       setDeployment(nextDeployment);
       setRevisions(nextRevisions);
       setRuns(nextRuns);
+      if (
+        selectedRunId !== null &&
+        nextRuns.some(
+          (run) => run.id === selectedRunId && run.status === "Running",
+        )
+      ) {
+        void loadRunDetail(selectedRunId);
+      }
       setLoadError(null);
     } catch (error) {
       setLoadError(
@@ -227,7 +261,7 @@ export default function ControlPlanePage() {
           : "The Control Plane could not be loaded.",
       );
     }
-  }, []);
+  }, [loadRunDetail, selectedRunId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -284,30 +318,22 @@ export default function ControlPlanePage() {
       setRevisions(nextRevisions);
       setDraft(emptyDraft);
       setEditingEntryId(null);
+      return true;
     } catch (error) {
       setSaveError(
         error instanceof Error
           ? error.message
           : "The Catalog could not be saved.",
       );
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
 
   const viewRun = async (runId: string) => {
-    try {
-      setSelectedRun(
-        await request<SynchronizationRunDetail>(`/api/runs/${runId}`),
-      );
-      setRunError(null);
-    } catch (error) {
-      setRunError(
-        error instanceof Error
-          ? error.message
-          : "The Synchronization Run could not be loaded.",
-      );
-    }
+    setSelectedRunId(runId);
+    await loadRunDetail(runId);
   };
 
   const startRun = async () => {
@@ -398,7 +424,7 @@ export default function ControlPlanePage() {
       });
   };
 
-  const submitException = (event: FormEvent<HTMLFormElement>) => {
+  const submitException = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (catalog === null) {
       return;
@@ -408,7 +434,7 @@ export default function ControlPlanePage() {
       .split(",")
       .map((vulnerabilityId) => vulnerabilityId.trim())
       .filter((vulnerabilityId) => vulnerabilityId.length > 0);
-    void saveCatalog(catalog.entries, [
+    const saved = await saveCatalog(catalog.entries, [
       ...catalog.vulnerabilityExceptions,
       {
         id: crypto.randomUUID(),
@@ -417,7 +443,9 @@ export default function ControlPlanePage() {
         reason: exceptionDraft.reason,
       },
     ]);
-    setExceptionDraft(emptyExceptionDraft);
+    if (saved) {
+      setExceptionDraft(emptyExceptionDraft);
+    }
   };
 
   const expectedCredentialHandleType =
@@ -965,6 +993,14 @@ export default function ControlPlanePage() {
                   </div>
                   <div>
                     <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">
+                      Persisted Run Log limit
+                    </dt>
+                    <dd className="mt-1 font-medium text-[#1c2333]">
+                      {formatMegabytes(deployment.runLogLimitBytes)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">
                       Credential Handles
                     </dt>
                     <dd className="mt-2 space-y-2">
@@ -1135,7 +1171,8 @@ export default function ControlPlanePage() {
                       className="mt-3 rounded-[12px] border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-900"
                       role="status"
                     >
-                      Persisted logs reached this deployment&apos;s configured
+                      Persisted logs reached the{" "}
+                      {formatMegabytes(deployment?.runLogLimitBytes ?? 0)}{" "}
                       limit. Complete JSON logs remain available from the
                       application process.
                     </p>

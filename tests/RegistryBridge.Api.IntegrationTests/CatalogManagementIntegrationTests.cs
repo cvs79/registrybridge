@@ -134,6 +134,7 @@ public sealed class CatalogManagementIntegrationTests(PostgreSqlFixture postgreS
             configuration: new Dictionary<string, string?>
             {
                 ["Deployment:TargetRegistry"] = "registry.example.test",
+                ["Deployment:RunLogLimitBytes"] = "5242880",
                 ["Deployment:CredentialHandles:0:Name"] = "upstream-registry",
                 ["Deployment:CredentialHandles:0:Type"] = "OciRegistry",
                 ["CredentialValues:upstream-registry"] = "do-not-expose-me"
@@ -145,6 +146,7 @@ public sealed class CatalogManagementIntegrationTests(PostgreSqlFixture postgreS
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("registry.example.test", configuration.RootElement.GetProperty("targetRegistry").GetString());
+        Assert.Equal(5_242_880, configuration.RootElement.GetProperty("runLogLimitBytes").GetInt32());
         Assert.Equal(
             "upstream-registry",
             configuration.RootElement.GetProperty("credentialHandles")[0].GetProperty("name").GetString());
