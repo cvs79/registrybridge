@@ -374,6 +374,7 @@ internal sealed class RunLogWriter(
         Console.WriteLine(JsonSerializer.Serialize(new { eventType, data = JsonSerializer.Deserialize<JsonElement>(dataJson) }));
         if (storedBytes + System.Text.Encoding.UTF8.GetByteCount(dataJson) > deployment.RunLogLimitBytes)
         {
+            run.LogsTruncated = true;
             return Task.CompletedTask;
         }
 

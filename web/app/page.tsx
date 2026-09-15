@@ -15,16 +15,30 @@ type CatalogEntry = {
   credentialHandle: string | null;
   enabled: boolean;
   order: number;
+  kind: CatalogEntryKind;
+  sourceVersion: string | null;
+  expectedDigest: string | null;
+};
+
+type CatalogEntryKind = "ImageMirror" | "WrapperBuild" | "HelmChart";
+
+type VulnerabilityException = {
+  id: string;
+  imageDigest: string;
+  vulnerabilityIds: string[];
+  reason: string;
 };
 
 type Catalog = {
   currentRevision: CatalogRevision | null;
   entries: CatalogEntry[];
+  vulnerabilityExceptions: VulnerabilityException[];
 };
 
 type CatalogRevisionSnapshot = {
   revision: CatalogRevision;
   entries: CatalogEntry[];
+  vulnerabilityExceptions: VulnerabilityException[];
 };
 
 type CredentialHandle = {
@@ -34,7 +48,37 @@ type CredentialHandle = {
 
 type DeploymentConfiguration = {
   targetRegistry: string;
+  runLogLimitBytes: number;
   credentialHandles: CredentialHandle[];
+};
+
+type SynchronizationRun = {
+  id: string;
+  catalogRevisionId: string | null;
+  origin: string;
+  status: string;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  logsTruncated: boolean;
+};
+
+type ArtifactOutcome = {
+  catalogEntryId: string;
+  order: number;
+  disposition: string;
+  detail: string | null;
+};
+
+type RunLog = {
+  occurredAt: string;
+  eventType: string;
+  data: string;
+};
+
+type SynchronizationRunDetail = SynchronizationRun & {
+  outcomes: ArtifactOutcome[];
+  logs: RunLog[];
 };
 
 type EntryDraft = Omit<CatalogEntry, "id" | "order">;
@@ -45,6 +89,15 @@ const emptyDraft: EntryDraft = {
   targetTag: "",
   credentialHandle: null,
   enabled: true,
+  kind: "ImageMirror",
+  sourceVersion: null,
+  expectedDigest: null,
+};
+
+const emptyExceptionDraft = {
+  imageDigest: "",
+  vulnerabilityIds: "",
+  reason: "",
 };
 
 const glassCard =
@@ -65,8 +118,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
           reason?: string;
           errors?: Record<string, string[]>;
         };
-        const validationMessages = Object.values(problem.errors ?? {}).flat().join(" ");
-        message = problem.reason ?? problem.detail ?? (validationMessages || message);
+        const validationMessages = Object.values(problem.errors ?? {})
+          .flat()
+          .join(" ");
+        message =
+          problem.reason ?? problem.detail ?? (validationMessages || message);
       } catch {
         message = body;
       }
@@ -85,12 +141,29 @@ function formatRevisionDate(value: string): string {
   }).format(new Date(value));
 }
 
-function StatusPill({ children, muted = false }: { children: React.ReactNode; muted?: boolean }) {
+function formatMegabytes(bytes: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    style: "unit",
+    unit: "megabyte",
+    unitDisplay: "short",
+  }).format(bytes / (1024 * 1024));
+}
+
+function StatusPill({
+  children,
+  muted = false,
+}: {
+  children: React.ReactNode;
+  muted?: boolean;
+}) {
   return (
     <span
       className={[
         "rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide",
-        muted ? "bg-slate-500/10 text-slate-500" : "bg-emerald-500/15 text-emerald-800",
+        muted
+          ? "bg-slate-500/10 text-[#53617d]"
+          : "bg-emerald-500/15 text-emerald-800",
       ].join(" ")}
     >
       {children}
@@ -113,7 +186,9 @@ function CardHeading({
         <p className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">
           {eyebrow}
         </p>
-        <h2 className="mt-1 text-[16px] font-semibold text-[#1c2333]">{title}</h2>
+        <h2 className="mt-1 text-[16px] font-semibold text-[#1c2333]">
+          {title}
+        </h2>
       </div>
       {action}
     </div>
@@ -122,31 +197,71 @@ function CardHeading({
 
 export default function ControlPlanePage() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [deployment, setDeployment] = useState<DeploymentConfiguration | null>(null);
+  const [deployment, setDeployment] = useState<DeploymentConfiguration | null>(
+    null,
+  );
   const [revisions, setRevisions] = useState<CatalogRevision[]>([]);
-  const [selectedRevision, setSelectedRevision] = useState<CatalogRevisionSnapshot | null>(null);
+  const [selectedRevision, setSelectedRevision] =
+    useState<CatalogRevisionSnapshot | null>(null);
   const [draft, setDraft] = useState<EntryDraft>(emptyDraft);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [exceptionDraft, setExceptionDraft] = useState(emptyExceptionDraft);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [runs, setRuns] = useState<SynchronizationRun[]>([]);
+  const [selectedRun, setSelectedRun] =
+    useState<SynchronizationRunDetail | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isStartingRun, setIsStartingRun] = useState(false);
+
+  const loadRunDetail = useCallback(async (runId: string) => {
+    try {
+      setSelectedRun(
+        await request<SynchronizationRunDetail>(`/api/runs/${runId}`),
+      );
+      setRunError(null);
+    } catch (error) {
+      setRunError(
+        error instanceof Error
+          ? error.message
+          : "The Synchronization Run could not be loaded.",
+      );
+    }
+  }, []);
 
   const loadControlPlane = useCallback(async () => {
     try {
-      const [nextCatalog, nextDeployment, nextRevisions] = await Promise.all([
-        request<Catalog>("/api/catalog"),
-        request<DeploymentConfiguration>("/api/deployment-configuration"),
-        request<CatalogRevision[]>("/api/catalog/revisions"),
-      ]);
+      const [nextCatalog, nextDeployment, nextRevisions, nextRuns] =
+        await Promise.all([
+          request<Catalog>("/api/catalog"),
+          request<DeploymentConfiguration>("/api/deployment-configuration"),
+          request<CatalogRevision[]>("/api/catalog/revisions"),
+          request<SynchronizationRun[]>("/api/runs"),
+        ]);
 
       setCatalog(nextCatalog);
       setDeployment(nextDeployment);
       setRevisions(nextRevisions);
+      setRuns(nextRuns);
+      if (
+        selectedRunId !== null &&
+        nextRuns.some(
+          (run) => run.id === selectedRunId && run.status === "Running",
+        )
+      ) {
+        void loadRunDetail(selectedRunId);
+      }
       setLoadError(null);
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "The Control Plane could not be loaded.");
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "The Control Plane could not be loaded.",
+      );
     }
-  }, []);
+  }, [loadRunDetail, selectedRunId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -156,7 +271,19 @@ export default function ControlPlanePage() {
     return () => window.clearTimeout(timer);
   }, [loadControlPlane]);
 
-  const saveCatalog = async (entries: CatalogEntry[]) => {
+  useEffect(() => {
+    if (!runs.some((run) => run.status === "Running")) {
+      return;
+    }
+
+    const timer = window.setInterval(() => void loadControlPlane(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [loadControlPlane, runs]);
+
+  const saveCatalog = async (
+    entries: CatalogEntry[],
+    vulnerabilityExceptions = catalog?.vulnerabilityExceptions ?? [],
+  ) => {
     if (catalog === null) {
       return;
     }
@@ -176,19 +303,55 @@ export default function ControlPlanePage() {
             targetTag: entry.targetTag,
             credentialHandle: entry.credentialHandle,
             enabled: entry.enabled,
+            kind: entry.kind,
+            sourceVersion: entry.sourceVersion,
+            expectedDigest: entry.expectedDigest,
           })),
+          vulnerabilityExceptions,
         }),
       });
-      const nextRevisions = await request<CatalogRevision[]>("/api/catalog/revisions");
+      const nextRevisions = await request<CatalogRevision[]>(
+        "/api/catalog/revisions",
+      );
 
       setCatalog(nextCatalog);
       setRevisions(nextRevisions);
       setDraft(emptyDraft);
       setEditingEntryId(null);
+      return true;
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "The Catalog could not be saved.");
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "The Catalog could not be saved.",
+      );
+      return false;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const viewRun = async (runId: string) => {
+    setSelectedRunId(runId);
+    await loadRunDetail(runId);
+  };
+
+  const startRun = async () => {
+    setIsStartingRun(true);
+    setRunError(null);
+    try {
+      const run = await request<SynchronizationRun>("/api/runs", {
+        method: "POST",
+      });
+      await Promise.all([loadControlPlane(), viewRun(run.id)]);
+    } catch (error) {
+      setRunError(
+        error instanceof Error
+          ? error.message
+          : "The Synchronization Run could not be started.",
+      );
+    } finally {
+      setIsStartingRun(false);
     }
   };
 
@@ -206,7 +369,9 @@ export default function ControlPlanePage() {
     const entries =
       editingEntryId === null
         ? [...catalog.entries, entry]
-        : catalog.entries.map((candidate) => (candidate.id === editingEntryId ? entry : candidate));
+        : catalog.entries.map((candidate) =>
+            candidate.id === editingEntryId ? entry : candidate,
+          );
 
     void saveCatalog(entries);
   };
@@ -218,6 +383,9 @@ export default function ControlPlanePage() {
       targetTag: entry.targetTag,
       credentialHandle: entry.credentialHandle,
       enabled: entry.enabled,
+      kind: entry.kind,
+      sourceVersion: entry.sourceVersion,
+      expectedDigest: entry.expectedDigest,
     });
     setEditingEntryId(entry.id);
     setSaveError(null);
@@ -240,17 +408,57 @@ export default function ControlPlanePage() {
   };
 
   const viewRevision = (revisionId: string) => {
-    void request<CatalogRevisionSnapshot>(`/api/catalog/revisions/${revisionId}`)
+    void request<CatalogRevisionSnapshot>(
+      `/api/catalog/revisions/${revisionId}`,
+    )
       .then((revision) => {
         setSelectedRevision(revision);
         setSaveError(null);
       })
       .catch((error: unknown) => {
-        setSaveError(error instanceof Error ? error.message : "The Catalog Revision could not be loaded.");
+        setSaveError(
+          error instanceof Error
+            ? error.message
+            : "The Catalog Revision could not be loaded.",
+        );
       });
   };
 
-  const credentialHandles = deployment?.credentialHandles.filter((handle) => handle.type === "OciRegistry") ?? [];
+  const submitException = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (catalog === null) {
+      return;
+    }
+
+    const vulnerabilityIds = exceptionDraft.vulnerabilityIds
+      .split(",")
+      .map((vulnerabilityId) => vulnerabilityId.trim())
+      .filter((vulnerabilityId) => vulnerabilityId.length > 0);
+    const saved = await saveCatalog(catalog.entries, [
+      ...catalog.vulnerabilityExceptions,
+      {
+        id: crypto.randomUUID(),
+        imageDigest: exceptionDraft.imageDigest,
+        vulnerabilityIds,
+        reason: exceptionDraft.reason,
+      },
+    ]);
+    if (saved) {
+      setExceptionDraft(emptyExceptionDraft);
+    }
+  };
+
+  const expectedCredentialHandleType =
+    draft.kind === "ImageMirror" ||
+    (draft.kind === "HelmChart" && draft.sourceReference.startsWith("oci://"))
+      ? "OciRegistry"
+      : draft.kind === "WrapperBuild"
+        ? "HttpsGit"
+        : "HttpsHelm";
+  const credentialHandles =
+    deployment?.credentialHandles.filter(
+      (handle) => handle.type === expectedCredentialHandleType,
+    ) ?? [];
   const buttonClass =
     "rounded-[10px] border border-white/60 bg-white/55 px-3 py-1.5 text-xs font-semibold text-[#3b4b6b] shadow-sm transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -263,8 +471,12 @@ export default function ControlPlanePage() {
               RB
             </div>
             <div>
-              <p className="text-sm font-semibold tracking-tight text-[#1c2333]">RegistryBridge</p>
-              <p className="font-mono text-[9px] uppercase tracking-wide text-[#7a8298]">Control Plane</p>
+              <p className="text-sm font-semibold tracking-tight text-[#1c2333]">
+                RegistryBridge
+              </p>
+              <p className="font-mono text-[9px] uppercase tracking-wide text-[#7a8298]">
+                Control Plane
+              </p>
             </div>
           </div>
           <div className="rounded-[13px] border border-white/50 bg-white/28 p-1 shadow-[inset_0_1px_3px_rgba(40,52,96,0.08)]">
@@ -272,7 +484,12 @@ export default function ControlPlanePage() {
               Catalog
             </span>
           </div>
-          <button className={`ml-auto ${buttonClass}`} disabled={isSaving} onClick={() => void loadControlPlane()} type="button">
+          <button
+            className={`ml-auto ${buttonClass}`}
+            disabled={isSaving}
+            onClick={() => void loadControlPlane()}
+            type="button"
+          >
             Refresh
           </button>
         </div>
@@ -280,20 +497,31 @@ export default function ControlPlanePage() {
 
       <main className="mx-auto max-w-screen-2xl px-6 py-8">
         <div className="mb-8 max-w-2xl">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[#6a7287]">Deployment catalog</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#1c2333]">Registry operations, clearly controlled.</h1>
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[#6a7287]">
+            Deployment catalog
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#1c2333]">
+            Registry operations, clearly controlled.
+          </h1>
           <p className="mt-2 text-sm leading-6 text-[#5f6982]">
-            Configure immutable source-to-target image mirrors and review every Catalog Revision.
+            Configure immutable source-to-target image mirrors and review every
+            Catalog Revision.
           </p>
         </div>
 
         {loadError !== null && (
-          <p className="mb-5 rounded-[16px] border border-rose-300/60 bg-rose-50/70 px-4 py-3 text-sm text-rose-900" role="alert">
+          <p
+            className="mb-5 rounded-[16px] border border-rose-300/60 bg-rose-50/70 px-4 py-3 text-sm text-rose-900"
+            role="alert"
+          >
             {loadError}
           </p>
         )}
         {saveError !== null && (
-          <p className="mb-5 rounded-[16px] border border-rose-300/60 bg-rose-50/70 px-4 py-3 text-sm text-rose-900" role="alert">
+          <p
+            className="mb-5 rounded-[16px] border border-rose-300/60 bg-rose-50/70 px-4 py-3 text-sm text-rose-900"
+            role="alert"
+          >
             {saveError}
           </p>
         )}
@@ -303,39 +531,122 @@ export default function ControlPlanePage() {
             <section className={glassCard}>
               <CardHeading
                 eyebrow="Catalog"
-                title={catalog === null ? "Loading catalog" : catalog.entries.length === 0 ? "No catalog entries" : "Catalog entries"}
-                action={<StatusPill muted={catalog === null}>{catalog === null ? "Loading" : `${catalog.entries.length} entries`}</StatusPill>}
+                title={
+                  catalog === null
+                    ? "Loading catalog"
+                    : catalog.entries.length === 0
+                      ? "No catalog entries"
+                      : "Catalog entries"
+                }
+                action={
+                  <StatusPill muted={catalog === null}>
+                    {catalog === null
+                      ? "Loading"
+                      : `${catalog.entries.length} entries`}
+                  </StatusPill>
+                }
               />
               {catalog?.currentRevision === null && (
-                <p className="mb-5 text-sm text-[#6a7287]">Add an image mirror to create the first Catalog Revision.</p>
+                <p className="mb-5 text-sm text-[#6a7287]">
+                  Add an image mirror to create the first Catalog Revision.
+                </p>
               )}
               {catalog !== null && catalog.currentRevision !== null && (
                 <p className="mb-5 text-sm text-[#6a7287]">
-                  Editing saves a new immutable revision based on {formatRevisionDate(catalog.currentRevision.createdAt)}.
+                  Editing saves a new immutable revision based on{" "}
+                  {formatRevisionDate(catalog.currentRevision.createdAt)}.
                 </p>
               )}
               <div className="space-y-3">
                 {catalog?.entries.map((entry, index) => (
-                  <article key={entry.id} className="rounded-[16px] border border-white/55 bg-white/32 p-4">
+                  <article
+                    key={entry.id}
+                    className="rounded-[16px] border border-white/55 bg-white/32 p-4"
+                  >
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <strong className="text-sm font-semibold text-[#1c2333]">
                             {entry.targetRepository}:{entry.targetTag}
                           </strong>
-                          <StatusPill muted={!entry.enabled}>{entry.enabled ? "Enabled" : "Disabled"}</StatusPill>
+                          <StatusPill muted>
+                            {entry.kind === "HelmChart"
+                              ? "Helm Chart"
+                              : entry.kind === "WrapperBuild"
+                                ? "Wrapper Build"
+                                : "Image Mirror"}
+                          </StatusPill>
+                          <StatusPill muted={!entry.enabled}>
+                            {entry.enabled ? "Enabled" : "Disabled"}
+                          </StatusPill>
                         </div>
                         <code className="mt-2 block wrap-anywhere font-mono text-[11px] leading-5 text-[#5f6982]">
                           {entry.sourceReference}
                         </code>
-                        <p className="mt-1 text-xs text-[#7a8298]">{entry.credentialHandle ?? "No Credential Handle"}</p>
+                        <p className="mt-1 text-xs text-[#7a8298]">
+                          {entry.credentialHandle ?? "No Credential Handle"}
+                        </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <button className={buttonClass} disabled={isSaving || index === 0} onClick={() => moveEntry(entry.id, -1)} type="button">Move up</button>
-                        <button className={buttonClass} disabled={isSaving || index === catalog.entries.length - 1} onClick={() => moveEntry(entry.id, 1)} type="button">Move down</button>
-                        <button className={buttonClass} disabled={isSaving} onClick={() => void saveCatalog(catalog.entries.map((candidate) => candidate.id === entry.id ? { ...candidate, enabled: !candidate.enabled } : candidate))} type="button">{entry.enabled ? "Disable" : "Enable"}</button>
-                        <button className={buttonClass} disabled={isSaving} onClick={() => editEntry(entry)} type="button">Edit</button>
-                        <button className={`${buttonClass} text-rose-700`} disabled={isSaving} onClick={() => void saveCatalog(catalog.entries.filter((candidate) => candidate.id !== entry.id))} type="button">Remove</button>
+                        <button
+                          className={buttonClass}
+                          disabled={isSaving || index === 0}
+                          onClick={() => moveEntry(entry.id, -1)}
+                          type="button"
+                        >
+                          Move up
+                        </button>
+                        <button
+                          className={buttonClass}
+                          disabled={
+                            isSaving || index === catalog.entries.length - 1
+                          }
+                          onClick={() => moveEntry(entry.id, 1)}
+                          type="button"
+                        >
+                          Move down
+                        </button>
+                        <button
+                          className={buttonClass}
+                          disabled={isSaving}
+                          onClick={() =>
+                            void saveCatalog(
+                              catalog.entries.map((candidate) =>
+                                candidate.id === entry.id
+                                  ? {
+                                      ...candidate,
+                                      enabled: !candidate.enabled,
+                                    }
+                                  : candidate,
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          {entry.enabled ? "Disable" : "Enable"}
+                        </button>
+                        <button
+                          className={buttonClass}
+                          disabled={isSaving}
+                          onClick={() => editEntry(entry)}
+                          type="button"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className={`${buttonClass} text-rose-700`}
+                          disabled={isSaving}
+                          onClick={() =>
+                            void saveCatalog(
+                              catalog.entries.filter(
+                                (candidate) => candidate.id !== entry.id,
+                              ),
+                            )
+                          }
+                          type="button"
+                        >
+                          Remove
+                        </button>
                       </div>
                     </div>
                   </article>
@@ -344,36 +655,316 @@ export default function ControlPlanePage() {
             </section>
 
             <section className={glassCard}>
-              <CardHeading eyebrow="Catalog entry" title={editingEntryId === null ? "Add image mirror" : "Edit image mirror"} />
-              <form className="grid gap-4 md:grid-cols-2" onSubmit={submitEntry}>
+              <CardHeading
+                eyebrow="Catalog entry"
+                title={
+                  editingEntryId === null
+                    ? "Add Catalog Entry"
+                    : "Edit Catalog Entry"
+                }
+              />
+              <form
+                className="grid gap-4 md:grid-cols-2"
+                onSubmit={submitEntry}
+              >
                 <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b] md:col-span-2">
-                  Pinned source image
-                  <input className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20" disabled={isSaving || catalog === null} onChange={(event) => setDraft({ ...draft, sourceReference: event.target.value })} placeholder="registry.example/team/image@sha256:..." required value={draft.sourceReference} />
+                  Entry kind
+                  <select
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        credentialHandle: null,
+                        expectedDigest: null,
+                        kind: event.target.value as CatalogEntryKind,
+                        sourceReference: "",
+                        sourceVersion: null,
+                        targetTag: "",
+                      })
+                    }
+                    value={draft.kind}
+                  >
+                    <option value="ImageMirror">Image mirror</option>
+                    <option value="WrapperBuild">Wrapper Build</option>
+                    <option value="HelmChart">Helm Chart</option>
+                  </select>
                 </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b] md:col-span-2">
+                  {draft.kind === "ImageMirror"
+                    ? "Pinned source image"
+                    : draft.kind === "WrapperBuild"
+                      ? "HTTPS Git repository"
+                      : "Helm source"}
+                  <input
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        credentialHandle:
+                          draft.kind === "HelmChart"
+                            ? null
+                            : draft.credentialHandle,
+                        sourceReference: event.target.value,
+                      })
+                    }
+                    placeholder={
+                      draft.kind === "ImageMirror"
+                        ? "registry.example/team/image@sha256:..."
+                        : draft.kind === "WrapperBuild"
+                          ? "https://git.example/team/image.git"
+                          : "https://charts.example/team or oci://registry.example/charts"
+                    }
+                    required
+                    value={draft.sourceReference}
+                  />
+                </label>
+                {draft.kind !== "ImageMirror" && (
+                  <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
+                    {draft.kind === "WrapperBuild"
+                      ? "Full Git commit ID"
+                      : "Chart version"}
+                    <input
+                      className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                      disabled={isSaving || catalog === null}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          sourceVersion: event.target.value || null,
+                          targetTag:
+                            draft.kind === "HelmChart"
+                              ? event.target.value
+                              : draft.targetTag,
+                        })
+                      }
+                      required
+                      value={draft.sourceVersion ?? ""}
+                    />
+                  </label>
+                )}
+                {draft.kind === "HelmChart" && (
+                  <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
+                    Expected source digest
+                    <input
+                      className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                      disabled={isSaving || catalog === null}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          expectedDigest: event.target.value || null,
+                        })
+                      }
+                      placeholder="sha256:..."
+                      required
+                      value={draft.expectedDigest ?? ""}
+                    />
+                  </label>
+                )}
                 <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
                   Target repository
-                  <input className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20" disabled={isSaving || catalog === null} onChange={(event) => setDraft({ ...draft, targetRepository: event.target.value })} placeholder="mirrors/team/image" required value={draft.targetRepository} />
+                  <input
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        targetRepository: event.target.value,
+                      })
+                    }
+                    placeholder="mirrors/team/image"
+                    required
+                    value={draft.targetRepository}
+                  />
                 </label>
                 <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
-                  Target tag
-                  <input className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20" disabled={isSaving || catalog === null} onChange={(event) => setDraft({ ...draft, targetTag: event.target.value })} placeholder="2026.08.06" required value={draft.targetTag} />
+                  {draft.kind === "HelmChart"
+                    ? "Target chart version"
+                    : "Target tag"}
+                  <input
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setDraft({ ...draft, targetTag: event.target.value })
+                    }
+                    placeholder="2026.08.06"
+                    required
+                    value={draft.targetTag}
+                  />
                 </label>
                 <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
                   Credential Handle
-                  <select className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20" disabled={isSaving || catalog === null} onChange={(event) => setDraft({ ...draft, credentialHandle: event.target.value || null })} value={draft.credentialHandle ?? ""}>
+                  <select
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        credentialHandle: event.target.value || null,
+                      })
+                    }
+                    value={draft.credentialHandle ?? ""}
+                  >
                     <option value="">No Credential Handle</option>
-                    {credentialHandles.map((handle) => <option key={handle.name} value={handle.name}>{handle.name}</option>)}
+                    {credentialHandles.map((handle) => (
+                      <option key={handle.name} value={handle.name}>
+                        {handle.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="flex items-center gap-2 self-end pb-2 text-sm font-semibold text-[#3b4b6b]">
-                  <input checked={draft.enabled} disabled={isSaving || catalog === null} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} type="checkbox" />
+                  <input
+                    checked={draft.enabled}
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setDraft({ ...draft, enabled: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
                   Enabled
                 </label>
                 <div className="flex gap-2 md:col-span-2">
-                  <button className="rounded-[10px] bg-[#3b78d8] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#2e63b5] disabled:cursor-not-allowed disabled:opacity-50" disabled={isSaving || catalog === null} type="submit">
-                    {isSaving ? "Saving..." : editingEntryId === null ? "Add entry" : "Save entry"}
+                  <button
+                    className="rounded-[10px] bg-[#3b78d8] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#2e63b5] disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isSaving || catalog === null}
+                    type="submit"
+                  >
+                    {isSaving
+                      ? "Saving..."
+                      : editingEntryId === null
+                        ? "Add entry"
+                        : "Save entry"}
                   </button>
-                  {editingEntryId !== null && <button className={buttonClass} disabled={isSaving} onClick={() => { setDraft(emptyDraft); setEditingEntryId(null); setSaveError(null); }} type="button">Cancel edit</button>}
+                  {editingEntryId !== null && (
+                    <button
+                      className={buttonClass}
+                      disabled={isSaving}
+                      onClick={() => {
+                        setDraft(emptyDraft);
+                        setEditingEntryId(null);
+                        setSaveError(null);
+                      }}
+                      type="button"
+                    >
+                      Cancel edit
+                    </button>
+                  )}
+                </div>
+              </form>
+            </section>
+
+            <section className={glassCard}>
+              <CardHeading
+                eyebrow="Vulnerability policy"
+                title="Vulnerability Exceptions"
+                action={
+                  <StatusPill muted>
+                    {catalog?.vulnerabilityExceptions.length ?? 0} exceptions
+                  </StatusPill>
+                }
+              />
+              {catalog?.vulnerabilityExceptions.length === 0 && (
+                <p className="mb-5 text-sm text-[#6a7287]">
+                  No exceptions are recorded in the current Catalog Revision.
+                </p>
+              )}
+              <div className="mb-5 space-y-3">
+                {catalog?.vulnerabilityExceptions.map((exception) => (
+                  <article
+                    key={exception.id}
+                    className="rounded-[16px] border border-white/55 bg-white/32 p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <code className="block wrap-anywhere text-xs font-semibold text-[#1c2333]">
+                          {exception.imageDigest}
+                        </code>
+                        <p className="mt-2 text-xs text-[#5f6982]">
+                          {exception.vulnerabilityIds.join(", ")}
+                        </p>
+                        <p className="mt-1 text-xs text-[#7a8298]">
+                          {exception.reason}
+                        </p>
+                      </div>
+                      <button
+                        className={`${buttonClass} text-rose-700`}
+                        disabled={isSaving}
+                        onClick={() =>
+                          void saveCatalog(
+                            catalog.entries,
+                            catalog.vulnerabilityExceptions.filter(
+                              (candidate) => candidate.id !== exception.id,
+                            ),
+                          )
+                        }
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <form
+                className="grid gap-4 md:grid-cols-2"
+                onSubmit={submitException}
+              >
+                <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b] md:col-span-2">
+                  Image digest
+                  <input
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setExceptionDraft({
+                        ...exceptionDraft,
+                        imageDigest: event.target.value,
+                      })
+                    }
+                    placeholder="sha256:..."
+                    required
+                    value={exceptionDraft.imageDigest}
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
+                  Vulnerability IDs
+                  <input
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setExceptionDraft({
+                        ...exceptionDraft,
+                        vulnerabilityIds: event.target.value,
+                      })
+                    }
+                    placeholder="CVE-2026-0001, CVE-2026-0002"
+                    required
+                    value={exceptionDraft.vulnerabilityIds}
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs font-semibold text-[#3b4b6b]">
+                  Reason
+                  <input
+                    className="rounded-[10px] border border-white/70 bg-white/58 px-3 py-2 text-sm font-normal text-[#1c2333] outline-none transition focus:border-[#7192dd] focus:ring-2 focus:ring-[#7192dd]/20"
+                    disabled={isSaving || catalog === null}
+                    onChange={(event) =>
+                      setExceptionDraft({
+                        ...exceptionDraft,
+                        reason: event.target.value,
+                      })
+                    }
+                    required
+                    value={exceptionDraft.reason}
+                  />
+                </label>
+                <div className="md:col-span-2">
+                  <button
+                    className="rounded-[10px] bg-[#3b78d8] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#2e63b5] disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isSaving || catalog === null}
+                    type="submit"
+                  >
+                    Add exception
+                  </button>
                 </div>
               </form>
             </section>
@@ -381,22 +972,55 @@ export default function ControlPlanePage() {
 
           <aside className="space-y-5">
             <section className={glassCard}>
-              <CardHeading eyebrow="Deployment configuration" title="Target settings" action={<StatusPill muted>Read-only</StatusPill>} />
-              {deployment === null ? <p className="text-sm text-[#6a7287]">Loading deployment configuration...</p> : (
+              <CardHeading
+                eyebrow="Deployment configuration"
+                title="Target settings"
+                action={<StatusPill muted>Read-only</StatusPill>}
+              />
+              {deployment === null ? (
+                <p className="text-sm text-[#6a7287]">
+                  Loading deployment configuration...
+                </p>
+              ) : (
                 <dl className="space-y-4 text-sm">
                   <div>
-                    <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">Target registry</dt>
-                    <dd className="mt-1 font-medium text-[#1c2333]">{deployment.targetRegistry || "Not configured"}</dd>
+                    <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">
+                      Target registry
+                    </dt>
+                    <dd className="mt-1 font-medium text-[#1c2333]">
+                      {deployment.targetRegistry || "Not configured"}
+                    </dd>
                   </div>
                   <div>
-                    <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">Credential Handles</dt>
+                    <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">
+                      Persisted Run Log limit
+                    </dt>
+                    <dd className="mt-1 font-medium text-[#1c2333]">
+                      {formatMegabytes(deployment.runLogLimitBytes)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-[#7a8298]">
+                      Credential Handles
+                    </dt>
                     <dd className="mt-2 space-y-2">
-                      {deployment.credentialHandles.length === 0 ? <span className="text-[#6a7287]">None declared</span> : deployment.credentialHandles.map((handle) => (
-                        <div className="rounded-[12px] border border-white/50 bg-white/28 px-3 py-2" key={handle.name}>
-                          <code className="text-xs font-semibold text-[#1c2333]">{handle.name}</code>
-                          <span className="ml-2 text-xs text-[#7a8298]">{handle.type}</span>
-                        </div>
-                      ))}
+                      {deployment.credentialHandles.length === 0 ? (
+                        <span className="text-[#6a7287]">None declared</span>
+                      ) : (
+                        deployment.credentialHandles.map((handle) => (
+                          <div
+                            className="rounded-[12px] border border-white/50 bg-white/28 px-3 py-2"
+                            key={handle.name}
+                          >
+                            <code className="text-xs font-semibold text-[#1c2333]">
+                              {handle.name}
+                            </code>
+                            <span className="ml-2 text-xs text-[#7a8298]">
+                              {handle.type}
+                            </span>
+                          </div>
+                        ))
+                      )}
                     </dd>
                   </div>
                 </dl>
@@ -404,30 +1028,212 @@ export default function ControlPlanePage() {
             </section>
 
             <section className={glassCard}>
-              <CardHeading eyebrow="Catalog revisions" title="Immutable history" action={<StatusPill muted>{revisions.length} revisions</StatusPill>} />
-              {revisions.length === 0 ? <p className="text-sm text-[#6a7287]">No Catalog Revisions have been created.</p> : (
+              <CardHeading
+                eyebrow="Catalog revisions"
+                title="Immutable history"
+                action={
+                  <StatusPill muted>{revisions.length} revisions</StatusPill>
+                }
+              />
+              {revisions.length === 0 ? (
+                <p className="text-sm text-[#6a7287]">
+                  No Catalog Revisions have been created.
+                </p>
+              ) : (
                 <ol className="space-y-3">
                   {revisions.map((revision) => (
-                    <li className="rounded-[14px] border border-white/50 bg-white/28 p-3" key={revision.id}>
-                      <time className="block text-xs font-medium text-[#3b4b6b]" dateTime={revision.createdAt}>{formatRevisionDate(revision.createdAt)}</time>
-                      <code className="mt-1 block truncate font-mono text-[10px] text-[#7a8298]">{revision.id}</code>
-                      <button className={`mt-3 ${buttonClass}`} onClick={() => viewRevision(revision.id)} type="button">View snapshot</button>
+                    <li
+                      className="rounded-[14px] border border-white/50 bg-white/28 p-3"
+                      key={revision.id}
+                    >
+                      <time
+                        className="block text-xs font-medium text-[#3b4b6b]"
+                        dateTime={revision.createdAt}
+                      >
+                        {formatRevisionDate(revision.createdAt)}
+                      </time>
+                      <code className="mt-1 block truncate font-mono text-[10px] text-[#7a8298]">
+                        {revision.id}
+                      </code>
+                      <button
+                        className={`mt-3 ${buttonClass}`}
+                        onClick={() => viewRevision(revision.id)}
+                        type="button"
+                      >
+                        View snapshot
+                      </button>
                     </li>
                   ))}
                 </ol>
               )}
               {selectedRevision !== null && (
                 <div className="mt-4 border-t border-white/60 pt-4">
-                  <p className="text-sm font-semibold text-[#1c2333]">Revision snapshot</p>
-                  <p className="mt-1 text-xs text-[#6a7287]">{formatRevisionDate(selectedRevision.revision.createdAt)}</p>
+                  <p className="text-sm font-semibold text-[#1c2333]">
+                    Revision snapshot
+                  </p>
+                  <p className="mt-1 text-xs text-[#6a7287]">
+                    {formatRevisionDate(selectedRevision.revision.createdAt)}
+                  </p>
                   <ol className="mt-3 space-y-2">
                     {selectedRevision.entries.map((entry) => (
-                      <li className="rounded-[12px] border border-white/45 bg-white/22 p-2.5 text-xs" key={entry.id}>
-                        <strong className="block text-[#1c2333]">{entry.targetRepository}:{entry.targetTag}</strong>
-                        <span className="mt-1 block text-[#6a7287]">{entry.enabled ? "Enabled" : "Disabled"}</span>
+                      <li
+                        className="rounded-[12px] border border-white/45 bg-white/22 p-2.5 text-xs"
+                        key={entry.id}
+                      >
+                        <strong className="block text-[#1c2333]">
+                          {entry.targetRepository}:{entry.targetTag}
+                        </strong>
+                        <span className="mt-1 block text-[#6a7287]">
+                          {entry.enabled ? "Enabled" : "Disabled"}
+                        </span>
                       </li>
                     ))}
                   </ol>
+                </div>
+              )}
+            </section>
+
+            <section className={glassCard}>
+              <CardHeading
+                eyebrow="Synchronization Runs"
+                title="Run history"
+                action={
+                  <button
+                    className={buttonClass}
+                    disabled={
+                      isStartingRun ||
+                      catalog === null ||
+                      catalog.currentRevision === null
+                    }
+                    onClick={() => void startRun()}
+                    type="button"
+                  >
+                    {isStartingRun ? "Starting..." : "Run now"}
+                  </button>
+                }
+              />
+              {runError !== null && (
+                <p
+                  className="mb-4 rounded-[12px] border border-rose-300/60 bg-rose-50/70 px-3 py-2 text-xs text-rose-900"
+                  role="alert"
+                >
+                  {runError}
+                </p>
+              )}
+              {runs.length === 0 ? (
+                <p className="text-sm text-[#6a7287]">
+                  No Synchronization Runs have been requested.
+                </p>
+              ) : (
+                <ol className="space-y-3">
+                  {runs.map((run) => (
+                    <li
+                      className="rounded-[14px] border border-white/50 bg-white/28 p-3"
+                      key={run.id}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <time
+                          className="text-xs font-medium text-[#3b4b6b]"
+                          dateTime={run.createdAt}
+                        >
+                          {formatRevisionDate(run.createdAt)}
+                        </time>
+                        <StatusPill muted={run.status !== "Completed"}>
+                          {run.status}
+                        </StatusPill>
+                      </div>
+                      <p className="mt-1 text-xs text-[#6a7287]">
+                        {run.origin} request
+                      </p>
+                      <button
+                        className={`mt-3 ${buttonClass}`}
+                        onClick={() => void viewRun(run.id)}
+                        type="button"
+                      >
+                        View details
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {selectedRun !== null && (
+                <div className="mt-4 border-t border-white/60 pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-[#1c2333]">
+                      Run details
+                    </p>
+                    <StatusPill muted={selectedRun.status !== "Completed"}>
+                      {selectedRun.status}
+                    </StatusPill>
+                  </div>
+                  {selectedRun.logsTruncated && (
+                    <p
+                      className="mt-3 rounded-[12px] border border-amber-300/60 bg-amber-50/70 px-3 py-2 text-xs text-amber-900"
+                      role="status"
+                    >
+                      Persisted logs reached the{" "}
+                      {formatMegabytes(deployment?.runLogLimitBytes ?? 0)}{" "}
+                      limit. Complete JSON logs remain available from the
+                      application process.
+                    </p>
+                  )}
+                  <p className="mt-4 text-xs font-semibold text-[#3b4b6b]">
+                    Artifact Outcomes
+                  </p>
+                  {selectedRun.outcomes.length === 0 ? (
+                    <p className="mt-2 text-xs text-[#6a7287]">
+                      No outcomes have been recorded yet.
+                    </p>
+                  ) : (
+                    <ol className="mt-2 space-y-2">
+                      {selectedRun.outcomes.map((outcome) => (
+                        <li
+                          className="rounded-[12px] border border-white/45 bg-white/22 p-2.5 text-xs"
+                          key={`${outcome.catalogEntryId}-${outcome.order}`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[#3b4b6b]">
+                              Entry {outcome.order + 1}
+                            </span>
+                            <StatusPill
+                              muted={outcome.disposition === "Not selected"}
+                            >
+                              {outcome.disposition}
+                            </StatusPill>
+                          </div>
+                          {outcome.detail !== null && (
+                            <p className="mt-1 wrap-anywhere text-[#6a7287]">
+                              {outcome.detail}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <p className="mt-4 text-xs font-semibold text-[#3b4b6b]">
+                    Persisted Run Logs
+                  </p>
+                  {selectedRun.logs.length === 0 ? (
+                    <p className="mt-2 text-xs text-[#6a7287]">
+                      No log events were retained.
+                    </p>
+                  ) : (
+                    <ol className="mt-2 max-h-80 space-y-2 overflow-y-auto">
+                      {selectedRun.logs.map((log) => (
+                        <li
+                          className="rounded-[12px] border border-white/45 bg-white/22 p-2.5 text-xs"
+                          key={`${log.occurredAt}-${log.eventType}`}
+                        >
+                          <p className="font-medium text-[#3b4b6b]">
+                            {log.eventType}
+                          </p>
+                          <code className="mt-1 block wrap-anywhere font-mono text-[10px] leading-4 text-[#6a7287]">
+                            {log.data}
+                          </code>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </div>
               )}
             </section>

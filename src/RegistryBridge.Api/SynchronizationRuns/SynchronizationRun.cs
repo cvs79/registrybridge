@@ -16,6 +16,8 @@ public sealed class SynchronizationRun
 
     public DateTimeOffset? CompletedAt { get; set; }
 
+    public bool LogsTruncated { get; set; }
+
     public Catalog.CatalogRevision? CatalogRevision { get; set; }
 
     public List<ArtifactOutcomeRecord> Outcomes { get; set; } = [];

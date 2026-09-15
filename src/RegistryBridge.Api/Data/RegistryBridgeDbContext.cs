@@ -46,6 +46,7 @@ public sealed class RegistryBridgeDbContext(DbContextOptions<RegistryBridgeDbCon
             entity.HasKey(run => run.Id);
             entity.Property(run => run.Origin).HasConversion<string>().IsRequired();
             entity.Property(run => run.Status).HasConversion<string>().IsRequired();
+            entity.Property(run => run.LogsTruncated).IsRequired();
             entity.HasOne(run => run.CatalogRevision)
                 .WithMany()
                 .HasForeignKey(run => run.CatalogRevisionId)

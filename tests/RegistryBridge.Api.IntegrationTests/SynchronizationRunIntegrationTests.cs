@@ -92,6 +92,24 @@ public sealed class SynchronizationRunIntegrationTests(PostgreSqlFixture postgre
         Assert.Contains("[REDACTED]", logs);
     }
 
+    [Fact]
+    public async Task IdentifiesWhenPersistedRunLogsReachTheConfiguredLimit()
+    {
+        await using var application = new RegistryBridgeApplicationFactory(
+            postgreSql.ConnectionString,
+            new SequencedArtifactExecutionGateway(
+                new ArtifactOutcome(ArtifactOutcomeDisposition.Promoted)),
+            new Dictionary<string, string?> { ["Deployment:RunLogLimitBytes"] = "1" });
+        using var client = application.CreateClient();
+        await SaveCatalogAsync(client, Guid.NewGuid());
+
+        using var startResponse = await client.PostAsync("/api/runs", null);
+        using var started = JsonDocument.Parse(await startResponse.Content.ReadAsStreamAsync());
+        using var completed = await WaitForRunAsync(client, started.RootElement.GetProperty("id").GetGuid());
+
+        Assert.True(completed.RootElement.GetProperty("logsTruncated").GetBoolean());
+    }
+
     private static async Task<JsonDocument> WaitForRunAsync(HttpClient client, Guid runId)
     {
         for (var attempt = 0; attempt < 100; attempt++)

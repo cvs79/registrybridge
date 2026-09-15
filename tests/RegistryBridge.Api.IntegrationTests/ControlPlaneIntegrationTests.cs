@@ -46,6 +46,7 @@ public sealed class ControlPlaneIntegrationTests(PostgreSqlFixture postgreSql)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(JsonValueKind.Null, catalog.RootElement.GetProperty("currentRevision").ValueKind);
         Assert.Empty(catalog.RootElement.GetProperty("entries").EnumerateArray());
+        Assert.Empty(catalog.RootElement.GetProperty("vulnerabilityExceptions").EnumerateArray());
     }
 
     [Fact]

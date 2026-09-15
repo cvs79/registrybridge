@@ -55,7 +55,10 @@ public static class CatalogDefinitions
     {
         if (revision is null)
         {
-            return new CatalogResponse(null, Array.Empty<CatalogEntryResponse>());
+            return new CatalogResponse(
+                null,
+                Array.Empty<CatalogEntryResponse>(),
+                Array.Empty<VulnerabilityExceptionResponse>());
         }
 
         var definition = Deserialize(revision.Definition);
