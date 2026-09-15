@@ -7,7 +7,8 @@ public sealed record SynchronizationRunResponse(
     string Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    bool LogsTruncated);
 
 public sealed record SynchronizationRunDetailResponse(
     Guid Id,
@@ -17,6 +18,7 @@ public sealed record SynchronizationRunDetailResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
+    bool LogsTruncated,
     IReadOnlyList<ArtifactOutcomeResponse> Outcomes,
     IReadOnlyList<RunLogResponse> Logs);
 
@@ -43,7 +45,8 @@ public static class SynchronizationRunResponses
             run.Status.ToString(),
             run.CreatedAt,
             run.StartedAt,
-            run.CompletedAt);
+            run.CompletedAt,
+            run.LogsTruncated);
 
     public static SynchronizationRunDetailResponse ToDetailResponse(SynchronizationRun run) =>
         new(
@@ -54,6 +57,7 @@ public static class SynchronizationRunResponses
             run.CreatedAt,
             run.StartedAt,
             run.CompletedAt,
+            run.LogsTruncated,
             run.Outcomes
                 .OrderBy(outcome => outcome.Order)
                 .Select(
